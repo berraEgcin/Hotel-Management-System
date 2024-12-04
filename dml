@@ -1,3 +1,55 @@
+/* CREATE PROCEDURE admin_add_room (
+    IN add_room_ID int ,
+    IN add_type_ID int ,
+    IN addIsAvailable BOOLEAN,
+    IN add_isClean ENUM ('Clean', 'Dirty', 'In Progress')
+)
+    BEGIN
+        INSERT INTO room (room_ID, type_ID, isClean, isAvailable) VALUES (add_room_ID, add_type_ID, add_isClean, addIsAvailable);
+        VALUES (add_room_ID, add_type_ID, add_isClean, addIsAvailable);
+    END//
+
+CREATE PROCEDURE admin_add_employee (
+    IN add_employee_ID int,
+    IN add_role ENUM ('receptionist', 'housekeeping')
+)
+    BEGIN
+        INSERT INTO employee (employee_ID, role) VALUES (add_employee_ID, add_role);
+    END//
+
+    CREATE PROCEDURE admin_add_guest (
+        IN add_guest_ID int,
+        IN add_birth_date DATE,
+        IN add_b_points int,
+        IN add_loyalty_id int,
+        IN add_phone_number varchar(10)
+    )
+    BEGIN
+        INSERT INTO guest (guest_ID, birth_date, b_points, loyalty_id, phone_number) VALUES (add_guest_ID, add_birth_date, add_b_points, add_loyalty_id, add_phone_number);
+    END//
+
+CREATE PROCEDURE admin_delete_room (
+    IN delete_room_ID int
+)
+    IF NOT EXISTS (
+        SELECT 1
+        FROM booking -- 1 mi * mı
+        WHERE room_id = delete_room_ID
+        AND b_status = 'confirmed'
+        AND check_out >= CURDATE() -- check if the room booked in the future
+    ) THEN
+        DELETE FROM room WHERE room_id = delete_room_ID;
+    ELSE
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'The room is booked, therefore cannot be deleted';
+    END IF;
+END //
+
+CALL admin_delete_room(1);
+*/
+
+
+
 DROP PROCEDURE IF EXISTS admin_check_room_status;
 DROP PROCEDURE IF EXISTS admin_add_room;
 DROP PROCEDURE IF EXISTS admin_modify_room;
@@ -125,19 +177,22 @@ END //
 
 CREATE PROCEDURE admin_check_room_status(IN p_room_id INT)
 BEGIN
-    SELECT
-        r.room_id,
-        rt.type_name,
-        r.isClean,
-        r.isAvailable,
-        rt.price,
-        COALESCE(b.booking_id, 'No active booking') as current_booking
-    FROM room r
-    JOIN room_type rt ON r.type_id = rt.type_id
-    LEFT JOIN booking b ON r.room_id = b.room_id
-        AND b.b_status = 'confirmed'
-        AND CURDATE() BETWEEN b.check_in AND b.check_out
-    WHERE r.room_id = p_room_id;
+    IF NOT EXISTS (SELECT 1 FROM room WHERE room_id = p_room_id) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'room is not created.';
+    ELSE
+        SELECT
+            r.room_id,
+            rt.type_name,
+            r.isClean,
+            r.isAvailable,
+            rt.price,
+            COALESCE(b.booking_id, 'No active booking') AS current_booking
+        FROM room r
+        JOIN room_type rt ON r.type_id = rt.type_id
+        LEFT JOIN booking b ON r.room_id = b.room_id
+            AND b.b_status = 'confirmed'
+        WHERE r.room_id = p_room_id;
+    END IF;
 END //
 
 CREATE PROCEDURE admin_add_room(
@@ -147,6 +202,25 @@ CREATE PROCEDURE admin_add_room(
     IN p_is_available BOOLEAN
 )
 BEGIN
+IF EXISTS (SELECT 1 FROM room WHERE room_id = p_room_id) THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Room ID already exists.';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM room_type WHERE type_id = p_type_id) THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Invalid Type ID: Type does not exist.';
+    END IF;
+
+    IF p_is_clean NOT IN ('Clean', 'Dirty', 'In Progress') THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Invalid cleanliness status.';
+    END IF;
+
+    IF p_is_available NOT IN (TRUE, FALSE) THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Invalid availability status.';
+    END IF;
     INSERT INTO room (room_id, type_id, isClean, isAvailable)
     VALUES (p_room_id, p_type_id, p_is_clean, p_is_available);
 END //
@@ -158,6 +232,26 @@ CREATE PROCEDURE admin_modify_room(
     IN p_is_available BOOLEAN
 )
 BEGIN
+IF NOT EXISTS (SELECT 1 FROM room WHERE room_id = p_room_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Room ID does not exist.';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM room_type WHERE type_id = p_type_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Invalid Type ID: Type does not exist.';
+    END IF;
+
+    IF p_is_clean NOT IN ('Clean', 'Dirty', 'In Progress') THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Invalid cleanliness status.';
+    END IF;
+
+    IF p_is_available NOT IN (TRUE, FALSE) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Invalid availability status.';
+    END IF;
+
     UPDATE room
     SET type_id = p_type_id,
         isClean = p_is_clean,
@@ -166,14 +260,18 @@ BEGIN
 END //
 
 
-CREATE PROCEDURE admin_handle_unpaid_booking(IN p_booking_id INT)
+CREATE PROCEDURE admin_handle_unpaid_booking(IN p_booking_id INT) -- check later
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM booking WHERE booking_id = p_booking_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Booking ID does not exist.';
+    END IF;
+
     IF NOT EXISTS (SELECT 1 FROM payment WHERE booking_id = p_booking_id) THEN
         UPDATE booking
         SET b_status = 'cancelled'
         WHERE booking_id = p_booking_id;
 
-        -- Update room availability
         UPDATE room r
         JOIN booking b ON r.room_id = b.room_id
         SET r.isAvailable = TRUE
@@ -202,17 +300,26 @@ CREATE PROCEDURE admin_generate_revenue_report(
     IN end_date DATE
 )
 BEGIN
+    -- Check if start_date is before end_date
+    IF start_date >= end_date THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid date range: start_date must be before end_date.';
+    END IF;
+
     SELECT
         rt.type_name,
-        COUNT(b.booking_id) as total_bookings,
-        SUM(p.amount) as total_revenue,
-        AVG(p.amount) as average_revenue_per_booking
+        COUNT(b.booking_id) AS total_bookings,
+        COALESCE(SUM(p.amount), 0) AS total_revenue,
+        COALESCE(AVG(p.amount), 0) AS average_revenue_per_booking
     FROM booking b
     JOIN payment p ON b.booking_id = p.booking_id
     JOIN room r ON b.room_id = r.room_id
     JOIN room_type rt ON r.type_id = rt.type_id
     WHERE b.check_in BETWEEN start_date AND end_date
     GROUP BY rt.type_name WITH ROLLUP;
+
+    IF ROW_COUNT() = 0 THEN
+        SELECT 'No bookings found in the specified date range.' AS message;
+    END IF;
 END //
 
 CREATE PROCEDURE admin_view_all_bookings()
