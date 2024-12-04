@@ -4,13 +4,13 @@ CREATE database hotel_management_system1;
 
 USE hotel_management_system1;
 
-DROP TABLE IF EXISTS schedulee;
-DROP TABLE IF EXISTS housekeeping;
-DROP TABLE IF EXISTS receptionist;
-DROP TABLE IF EXISTS employee_name;
+DROP TABLE IF EXISTS schedulee; --
+DROP TABLE IF EXISTS housekeeping; --
+DROP TABLE IF EXISTS receptionist; --
+DROP TABLE IF EXISTS employee_name; --
 DROP TABLE IF EXISTS employee;
-DROP TABLE IF EXISTS payment;
-DROP TABLE IF EXISTS booking;
+DROP TABLE IF EXISTS payment; --
+DROP TABLE IF EXISTS booking;--
 DROP TABLE IF EXISTS room;
 DROP TABLE IF EXISTS room_type;
 DROP TABLE IF EXISTS inviteeName;
@@ -21,12 +21,6 @@ DROP TABLE IF EXISTS loyalty;
 DROP TABLE IF EXISTS address;
 DROP TABLE IF EXISTS hotel;
 DROP TABLE IF EXISTS administrator;
-
-
-
- -- CHECK FOREIGN KEYS AGAIN
--- Hotel and admin,employee
- --
 
 CREATE TABLE hotel
 (
@@ -78,6 +72,8 @@ CREATE TABLE room_type
     description varchar(255),
     PRIMARY KEY (type_ID)
 );
+
+
 CREATE TABLE room
 (
     room_ID int NOT NULL,
@@ -100,12 +96,7 @@ CREATE TABLE address
     FOREIGN KEY (hotel_ID) REFERENCES hotel(hotel_ID)
 );
 
-CREATE TABLE employee
-(
-    employee_ID int NOT NULL,
-    role ENUM('receptionist', 'housekeeping'),
-    PRIMARY KEY (employee_ID)
-);
+
 
 
 CREATE TABLE guest
@@ -127,12 +118,8 @@ FOR EACH ROW
 BEGIN
     SET NEW.age = TIMESTAMPDIFF(YEAR, NEW.birth_date, CURDATE());
 END;
-	DELIMITER ;
 
-
--- FINISH
-
-
+DELIMITER ;
 
 
 CREATE TABLE guest_name
@@ -154,13 +141,13 @@ CREATE TABLE invitee
 
 CREATE TABLE inviteeName
 (
-    invitee_ID int NOT NULL,
+    invitee_ID   int NOT NULL,
     i_first_name varchar(255),
-    i_last_name varchar(255),
+    i_last_name  varchar(255),
     FOREIGN KEY (invitee_ID) REFERENCES invitee (invitee_ID)
 );
 
-
+--
 
 CREATE TABLE booking
 (
@@ -189,7 +176,12 @@ CREATE TABLE payment
     FOREIGN KEY (booking_ID) REFERENCES booking (booking_ID)
 );
 
-
+CREATE TABLE employee
+(
+    employee_ID int NOT NULL,
+    role ENUM('receptionist', 'housekeeping'),
+    PRIMARY KEY (employee_ID)
+);
 
 CREATE TABLE employee_name
 (
@@ -225,102 +217,3 @@ CREATE TABLE schedulee
     FOREIGN KEY (employee_ID) REFERENCES housekeeping(employee_ID), -- housekeeping is a subclass of employee
     FOREIGN KEY (room_ID) REFERENCES room(room_ID)
 );
-
-
-
-
-
-
--- DML PART
-
--- Start with Hotel since it's a parent table
-INSERT INTO hotel (hotel_ID, hotel_name) VALUES
-(1, 'Luxury Palace'),
-(2, 'Budget Inn'),
-(3, 'Resort & Spa');
-
--- Address for hotels
-INSERT INTO address (hotel_ID, street, city, district) VALUES
-(1, '123 Main St', 'New York', 'Manhattan'),
-(2, '456 Side St', 'Chicago', 'Loop'),
-(3, '789 Beach Rd', 'Miami', 'South Beach');
-
--- Loyalty tiers
-INSERT INTO loyalty (loyalty_id, loyalty_rank) VALUES
-(1, 'bronze'),
-(2, 'silver'),
-(3, 'gold');
-
--- Guests with edge cases
-INSERT INTO guest (guest_ID, birth_date, b_points, loyalty_id, phone_number) VALUES
-(1, '1990-01-01', 5, 1, '1234567890'),
-(2, '2000-12-31', 25, 2, '9876543210'),
-(3, '1950-06-15', 75, 3, '5555555555'),
-(4, '2023-01-01', 0, 1, '1111111111'),  -- Very young guest
-(5, NULL, 100, 3, '2222222222'),        -- NULL birth date
-(6, '1900-01-01', -5, 1, '12345');      -- Invalid points and phone number
-
--- Guest names
-INSERT INTO guest_name (guest_ID, g_first_Name, g_last_name) VALUES
-(1, 'John', 'Doe'),
-(2, 'Jane', 'Smith'),
-(3, 'Robert', NULL),                     -- NULL last name
-(4, 'Baby', 'Jones'),
-(5, 'Test', 'User');
-
--- Room types
-INSERT INTO room_type (type_ID, type_name, max_occupancy, price, bed_count, bed_type, description) VALUES
-(1,  'Single', 1, 100, 1, 'Single', 'Basic room'),
-(2,  'Double', 2, 200, 2, 'Queen', 'Comfort room'),
-(3,  'Suite', 4, 500, 2, 'King', 'Luxury suite'),
-(4,  'Suite', 6, 1000, 3, 'King', NULL);  -- NULL description
-
--- Rooms
-INSERT INTO room (room_ID, type_ID, isClean, isAvailable) VALUES
-(1, 1, 'Clean', TRUE),
-(2, 2, 'Clean', TRUE),
-(3, 3, 'In Progress', TRUE),
-(4, 1, NULL, TRUE);  -- Invalid cleanliness status
-
--- Bookings with edge cases
-INSERT INTO booking (booking_ID, guest_ID, room_ID, num_Of_Guests, check_in, check_out, b_status) VALUES
-(1, 1, 1, 1, '2024-01-01', '2024-01-05', 'confirmed'),
-(2, 2, 2, 2, '2024-01-31', '2024-12-12', 'confirmed'),  -- Check-out before check-in
-(3, 3, 3, 6, '2024-03-01', '2024-03-05', 'pending'),    -- More guests than max_occupancy
-(4, 4, 1, 0, '2024-04-01', '2024-04-05', 'cancelled'),  -- Invalid number of guests
-(5, 1, 1, 1, NULL, '2024-05-05', 'confirmed')  ;      -- NULL check-in date
-
--- Payments
-INSERT INTO payment (pay_ID, booking_ID, pay_method, pay_time, amount) VALUES
-(1, 1, 'cash', 'check out', 500),
-(2, 2, 'card', 'advance', 1000),
-(3, 3, 'cash', 'advance', -100),         -- Negative amount
-(4, 4, NULL, 'check out', 750);       -- NULL payment method
--- Employees
-INSERT INTO employee (employee_ID, role) VALUES
-(1, 'receptionist'),
-(2, 'housekeeping'),
-(3, 'receptionist');
--- Employee names
-INSERT INTO employee_name (employee_ID, e_first_name, e_last_name) VALUES
-(1, 'Alice', 'Johnson'),
-(2, 'Bob', 'Williams'),
-(3, 'Joe', 'Brown');                     -- Fixed duplicate primary key issue
-
--- Housekeeping
-INSERT INTO housekeeping (employee_ID) VALUES
-(2),
-(1);                                     -- Error: employee is a receptionist
-
-INSERT INTO administrator (admin_ID) VALUES
-(1);
-
--- Schedule
-INSERT INTO schedulee (schedulee_ID, employee_ID, room_ID, cleaning_date, status) VALUES
-(1, 2, 1, '2024-01-01', 'Completed'),
-(2, 2, 2, '2024-01-02', 'In Progress');
-
-
-
-
-
