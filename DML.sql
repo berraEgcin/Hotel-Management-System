@@ -1,54 +1,3 @@
-/* CREATE PROCEDURE admin_add_room (
-    IN add_room_ID int ,
-    IN add_type_ID int ,
-    IN addIsAvailable BOOLEAN,
-    IN add_isClean ENUM ('Clean', 'Dirty', 'In Progress')
-)
-    BEGIN
-        INSERT INTO room (room_ID, type_ID, isClean, isAvailable) VALUES (add_room_ID, add_type_ID, add_isClean, addIsAvailable);
-        VALUES (add_room_ID, add_type_ID, add_isClean, addIsAvailable);
-    END//
-
-CREATE PROCEDURE admin_add_employee (
-    IN add_employee_ID int,
-    IN add_role ENUM ('receptionist', 'housekeeping')
-)
-    BEGIN
-        INSERT INTO employee (employee_ID, role) VALUES (add_employee_ID, add_role);
-    END//
-
-    CREATE PROCEDURE admin_add_guest (
-        IN add_guest_ID int,
-        IN add_birth_date DATE,
-        IN add_b_points int,
-        IN add_loyalty_id int,
-        IN add_phone_number varchar(10)
-    )
-    BEGIN
-        INSERT INTO guest (guest_ID, birth_date, b_points, loyalty_id, phone_number) VALUES (add_guest_ID, add_birth_date, add_b_points, add_loyalty_id, add_phone_number);
-    END//
-
-CREATE PROCEDURE admin_delete_room (
-    IN delete_room_ID int
-)
-    IF NOT EXISTS (
-        SELECT 1
-        FROM booking -- 1 mi * mı
-        WHERE room_id = delete_room_ID
-        AND b_status = 'confirmed'
-        AND check_out >= CURDATE() -- check if the room booked in the future
-    ) THEN
-        DELETE FROM room WHERE room_id = delete_room_ID;
-    ELSE
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'The room is booked, therefore cannot be deleted';
-    END IF;
-END //
-
-CALL admin_delete_room(1);
-*/
-
-
 
 DROP PROCEDURE IF EXISTS admin_check_room_status;
 DROP PROCEDURE IF EXISTS admin_add_room;
@@ -73,6 +22,29 @@ DROP TRIGGER IF EXISTS payment_amount_check;
 
 DELIMITER //
 
+DROP TRIGGER IF EXISTS check_in_before_check_out;
+
+CREATE TRIGGER check_in_before_check_out
+BEFORE INSERT ON booking
+FOR EACH ROW
+BEGIN
+    IF NEW.check_out < NEW.check_in THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Check-out date must be after check-in date.';
+    END IF;
+END //
+
+DROP TRIGGER IF EXISTS check_in_before_check_out_update;
+CREATE TRIGGER check_in_before_check_out_update
+BEFORE UPDATE ON booking
+FOR EACH ROW
+BEGIN
+    IF NEW.check_out < NEW.check_in THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Check-out date must be after check-in date.';
+    END IF;
+END //
+
 
 CREATE TRIGGER room_price_check
 BEFORE INSERT ON room_type
@@ -83,6 +55,7 @@ BEGIN
     END IF;
 END //
 
+DROP TRIGGER IF EXISTS room_price_update_check;
 CREATE TRIGGER room_price_update_check
 BEFORE UPDATE ON room_type
 FOR EACH ROW
@@ -100,6 +73,8 @@ BEGIN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Amount cannot be negative';
     END IF;
 END //
+
+DROP TRIGGER IF EXISTS payment_amount_update_check;
 
 CREATE TRIGGER payment_amount_update_check
 BEFORE UPDATE ON payment
@@ -190,7 +165,6 @@ BEGIN
         FROM room r
         JOIN room_type rt ON r.type_id = rt.type_id
         LEFT JOIN booking b ON r.room_id = b.room_id
-            AND b.b_status = 'confirmed'
         WHERE r.room_id = p_room_id;
     END IF;
 END //
@@ -203,27 +177,50 @@ CREATE PROCEDURE admin_add_room(
 )
 BEGIN
 IF EXISTS (SELECT 1 FROM room WHERE room_id = p_room_id) THEN
-        SIGNAL SQLSTATE '45000' 
+        SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Room ID already exists.';
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM room_type WHERE type_id = p_type_id) THEN
-        SIGNAL SQLSTATE '45000' 
+        SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Invalid Type ID: Type does not exist.';
     END IF;
 
     IF p_is_clean NOT IN ('Clean', 'Dirty', 'In Progress') THEN
-        SIGNAL SQLSTATE '45000' 
+        SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Invalid cleanliness status.';
     END IF;
 
     IF p_is_available NOT IN (TRUE, FALSE) THEN
-        SIGNAL SQLSTATE '45000' 
+        SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Invalid availability status.';
     END IF;
     INSERT INTO room (room_id, type_id, isClean, isAvailable)
     VALUES (p_room_id, p_type_id, p_is_clean, p_is_available);
 END //
+
+DROP PROCEDURE IF EXISTS admin_delete_room;
+
+CREATE PROCEDURE admin_delete_room (
+    IN delete_room_ID INT
+)
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM booking
+        WHERE room_id = delete_room_ID
+        AND b_status = 'confirmed'
+        AND check_out >= CURDATE()
+    ) THEN
+        DELETE FROM room
+        WHERE room_id = delete_room_ID;
+    ELSE
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'The room is booked, therefore cannot be deleted';
+    END IF;
+END //
+
+
 
 CREATE PROCEDURE admin_modify_room(
     IN p_room_id INT,
@@ -260,7 +257,7 @@ IF NOT EXISTS (SELECT 1 FROM room WHERE room_id = p_room_id) THEN
 END //
 
 
-CREATE PROCEDURE admin_handle_unpaid_booking(IN p_booking_id INT) -- check later
+CREATE PROCEDURE admin_handle_unpaid_booking(IN p_booking_id INT)
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM booking WHERE booking_id = p_booking_id) THEN
         SIGNAL SQLSTATE '45000'
@@ -300,7 +297,6 @@ CREATE PROCEDURE admin_generate_revenue_report(
     IN end_date DATE
 )
 BEGIN
-    -- Check if start_date is before end_date
     IF start_date >= end_date THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid date range: start_date must be before end_date.';
     END IF;
@@ -333,7 +329,7 @@ BEGIN
         b.check_in,
         b.check_out,
         b.b_status,
-        COALESCE(p.amount, 'No payment') as payment_amount
+        COALESCE(p.amount, 'No payment required') as payment_amount
     FROM booking b
     JOIN guest g ON b.guest_id = g.guest_id
     JOIN guest_name gn ON g.guest_id = gn.guest_id
@@ -396,7 +392,44 @@ BEGIN
     ORDER BY e.role, en.e_last_name;
 END //
 
-DELIMITER ;
+DROP PROCEDURE IF EXISTS admin_add_guest;
+
+CREATE PROCEDURE admin_add_guest(
+    IN p_guest_id INT,
+    IN p_birth_date DATE,
+    IN p_b_points INT,
+    IN p_loyalty_id INT,
+    IN p_phone_number VARCHAR(10),
+    IN p_first_name VARCHAR(255),
+    IN p_last_name VARCHAR(255)
+)
+BEGIN
+
+    INSERT INTO guest (guest_ID, birth_date, b_points, loyalty_id, phone_number)
+    VALUES (p_guest_id, p_birth_date, p_b_points, p_loyalty_id, p_phone_number);
+
+    INSERT INTO guest_name (guest_ID, g_first_Name, g_last_name)
+    VALUES (p_guest_id, p_first_name, p_last_name);
+
+END //
+
+DROP PROCEDURE IF EXISTS admin_add_employee;
+
+CREATE PROCEDURE admin_add_employee(
+    IN p_employee_id INT,
+    IN p_role ENUM('receptionist', 'housekeeping'),
+    IN p_first_name VARCHAR(255),
+    IN p_last_name VARCHAR(255)
+)
+BEGIN
+    INSERT INTO employee (employee_ID, role)
+    VALUES (p_employee_id, p_role);
+
+    INSERT INTO employee_name (employee_ID, e_first_name, e_last_name)
+    VALUES (p_employee_id, p_first_name, p_last_name);
+END //
+
+
 
 CALL admin_check_room_status(1);
 CALL admin_add_room(102, 1, 'Clean', TRUE);
@@ -410,7 +443,7 @@ CALL admin_view_popular_room_types();
 CALL admin_view_employees();
 
 
--- RECEP
+-- RECEPTIONIST
 
 DROP PROCEDURE IF EXISTS receptionist_view_pending_bookings;
 DROP PROCEDURE IF EXISTS receptionist_confirm_booking;
@@ -420,8 +453,8 @@ DROP PROCEDURE IF EXISTS receptionist_assign_housekeeping;
 DROP PROCEDURE IF EXISTS receptionist_schedule_after_checkout;
 DROP PROCEDURE IF EXISTS receptionist_view_housekeepers_availability;
 DROP PROCEDURE IF EXISTS receptionist_modify_booking;
+DROP PROCEDURE IF EXISTS guest_view_available_rooms;
 
-DELIMITER //
 
 CREATE PROCEDURE receptionist_view_pending_bookings()
 BEGIN
@@ -503,7 +536,7 @@ BEGIN
     );
 END //
 
--- ?? CHECK ET
+
 CREATE PROCEDURE receptionist_process_payment(
     IN p_booking_id INT,
     IN p_amount INT,
@@ -595,7 +628,6 @@ BEGIN
     AND b_status != 'cancelled';
 END //
 
-DELIMITER ;
 
 CALL receptionist_view_pending_bookings();
 CALL receptionist_confirm_booking(1, 101);
@@ -615,7 +647,6 @@ DROP PROCEDURE IF EXISTS housekeeping_complete_task;
 DROP PROCEDURE IF EXISTS housekeeping_view_schedule;
 DROP PROCEDURE IF EXISTS housekeeping_view_today_tasks;
 
-DELIMITER //
 
 CREATE PROCEDURE housekeeping_view_rooms(IN p_employee_id INT)
 BEGIN
@@ -746,8 +777,6 @@ BEGIN
         s.room_id;
 END //
 
-DELIMITER ;
-
 CALL housekeeping_view_rooms(1);
 CALL housekeeping_view_pending_tasks(1);
 CALL housekeeping_view_completed_tasks(1, '2024-03-01', '2024-03-31');
@@ -756,8 +785,6 @@ CALL housekeeping_view_schedule(1, '2024-03-01', '2024-03-31');
 CALL housekeeping_view_today_tasks(1);
 
 -- GUEST
-
-DELIMITER //
 
 CREATE PROCEDURE guest_view_available_rooms(
     IN p_check_in DATE,
@@ -795,6 +822,8 @@ BEGIN
         END
     ORDER BY rt.price;
 END //
+
+DROP PROCEDURE IF EXISTS guest_add_booking;
 
 CREATE PROCEDURE guest_add_booking(
     IN p_guest_id INT,
@@ -841,6 +870,7 @@ BEGIN
     END IF;
 END //
 
+DROP PROCEDURE guest_view_my_bookings;
 CREATE PROCEDURE guest_view_my_bookings(IN p_guest_id INT)
 BEGIN
     SELECT
@@ -862,6 +892,7 @@ BEGIN
     ORDER BY b.check_in DESC;
 END //
 
+DROP PROCEDURE  IF EXISTS guest_cancel_booking;
 CREATE PROCEDURE guest_cancel_booking(
     IN p_guest_id INT,
     IN p_booking_id INT
@@ -891,6 +922,8 @@ BEGIN
     END IF;
 END //
 
+
+DROP PROCEDURE IF EXISTS guest_check_payment_status;
 CREATE PROCEDURE guest_check_payment_status(
     IN p_guest_id INT,
     IN p_booking_id INT
@@ -916,10 +949,89 @@ BEGIN
 END //
 
 
-DELIMITER ;
 
 CALL guest_view_available_rooms('2024-03-01', '2024-03-05', 4);
 CALL guest_add_booking(1, 101, 2, '2024-03-01', '2024-03-05');
 CALL guest_view_my_bookings(1);
 CALL guest_cancel_booking(1, 1);
 CALL guest_check_payment_status(1, 1);
+
+DELIMITER ;
+
+-- DATA INSERTION
+INSERT INTO hotel (hotel_ID, hotel_name) VALUES
+(1, 'Luxury Palace'),
+(2, 'Budget Inn'),
+(3, 'Resort & Spa');
+
+INSERT INTO address (hotel_ID, street, city, district) VALUES
+(1, '123 Main St', 'New York', 'Manhattan'),
+(2, '456 Side St', 'Chicago', 'Loop'),
+(3, '789 Beach Rd', 'Miami', 'South Beach');
+
+INSERT INTO loyalty (loyalty_id, loyalty_rank) VALUES
+(1, 'bronze'),
+(2, 'silver'),
+(3, 'gold');
+
+INSERT INTO guest (guest_ID, birth_date, b_points, loyalty_id, phone_number) VALUES
+(1, '1990-01-01', 5, 1, '1234567890'),
+(2, '2000-12-31', 25, 2, '9876543210'),
+(3, '1950-06-15', 75, 3, '5555555555');
+
+
+
+INSERT INTO guest_name (guest_ID, g_first_Name, g_last_name) VALUES
+(1, 'John', 'Doe'),
+(2, 'Jane', 'Smith'),
+(4, 'Baby', 'Jones'),
+(5, 'Test', 'User');
+
+
+INSERT INTO room_type (type_ID, type_name, max_occupancy, price, bed_count, bed_type, description) VALUES
+(1,  'Single', 1, 100, 1, 'Single', 'Basic room'),
+(2,  'Double', 2, 200, 2, 'Queen', 'Comfort room'),
+(3,  'Suite', 4, 500, 2, 'King', 'Luxury suite');
+
+
+INSERT INTO room (room_ID, type_ID, isClean, isAvailable) VALUES
+(1, 1, 'Clean', TRUE),
+(2, 2, 'Dirty', FALSE),
+(3, 3, 'In Progress', TRUE);
+
+
+
+INSERT INTO booking (booking_ID, guest_ID, room_ID, num_Of_Guests, check_in, check_out, b_status) VALUES
+(1, 1, 1, 1, '2024-01-01', '2024-01-05', 'confirmed'),
+(2, 2, 2, 2, '2024-02-01', '2024-01-31', 'confirmed'),
+(3, 3, 3, 6, '2024-03-01', '2024-03-05', 'pending'),
+(4, 4, 1, 0, '2024-04-01', '2024-04-05', 'cancelled'),
+(5, 1, 1, 1, NULL, '2024-05-05', 'confirmed');
+
+
+INSERT INTO payment (pay_ID, booking_ID, pay_method, pay_time, amount) VALUES
+(1, 1, 'cash', 'check out', 500),
+(2, 2, 'card', 'advance', 1000);
+
+INSERT INTO employee (employee_ID, role) VALUES
+(1, 'receptionist'),
+(2, 'housekeeping'),
+(3, 'receptionist');
+
+INSERT INTO employee_name (employee_ID, e_first_name, e_last_name) VALUES
+(1, 'Alice', 'Johnson'),
+(2, 'Bob', 'Williams'),
+(1, 'Jane', 'Doe');
+
+
+INSERT INTO housekeeping (employee_ID) VALUES
+(2);
+
+INSERT INTO administrator (admin_ID) VALUES
+(1);
+
+INSERT INTO schedulee (schedulee_ID, employee_ID, room_ID, cleaning_date, status) VALUES
+(1, 2, 1, '2024-01-01', 'Completed'),
+(2, 2, 2, '2024-01-02', 'In Progress'),
+(3, 1, 3, '2024-01-03', 'Not Started'),
+(4, 2, 999, '2024-01-04', 'Completed');
