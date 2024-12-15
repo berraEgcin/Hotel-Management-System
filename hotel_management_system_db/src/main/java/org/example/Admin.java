@@ -83,7 +83,7 @@ public class Admin extends JFrame {
         String query = "{CALL admin_add_room(?, ?, ?, ?)}";
         String url = "jdbc:mysql://localhost:3306/hotel_management_system1";
         String username = "root";
-        String password = "NZHBCt5*";
+        String password = "";
 
         try (Connection conn =DriverManager.getConnection(url, username, password);
              CallableStatement stmt = conn.prepareCall(query)) {
