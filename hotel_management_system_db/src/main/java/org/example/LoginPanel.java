@@ -46,7 +46,7 @@ public class LoginPanel extends JPanel {
     private boolean idExistsInDatabase(String role, String id) {
         String url = "jdbc:mysql://localhost:3306/hotel_management_system1";
         String user = "root";
-        String password = "NZHBCt5*";
+        String password = "";
 
         String query = "";
 
